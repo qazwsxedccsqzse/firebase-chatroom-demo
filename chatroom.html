@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title></title>
+
+    <!-- Bootstrap -->
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.5/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/font-awesome/4.4.0/css/font-awesome.min.css">
+
+    <!-- HTML5 Shim and Respond.js IE8 support of HTML5 elements and media queries -->
+    <!-- WARNING: Respond.js doesn't work if you view the page via file:// -->
+    <!--[if lt IE 9]>
+      <script src="https://oss.maxcdn.com/libs/html5shiv/3.7.2/html5shiv.js"></script>
+      <script src="https://oss.maxcdn.com/libs/respond.js/1.4.2/respond.min.js"></script>
+    <![endif]-->
+    <style>
+    .margin-top-20 {
+      margin-top: 20px;
+    }
+    .margin-top-50 {
+      margin-top: 50px;
+    }
+    textarea.form-control {
+      min-height: 300px;
+      resize: none;
+    }
+    #send-btn {
+      cursor: pointer;
+    }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <!-- logout -->
+      <div class="row margin-top-20">
+        <div class="col-lg-12 col-md-12 col-sm-12 col-xs-12">
+          <div class="btn btn-danger pull-right" id="logout">Logout</div>
+        </div>
+      </div>
+      <!-- show msgs -->
+      <div class="row margin-top-50">
+        <div class="col-lg-12 col-md-12 col-sm-12 col-xs-12">
+          <div class="form-group">
+          <label for="comment">聊天室訊息</label>
+          <textarea class="form-control" id="msgBoard"></textarea>
+          </div>
+        </div>
+      </div>
+      <!-- input msg -->
+      <div class="row margin-top-20">
+        <div class="col-lg-12 col-md-12 col-sm-12 col-xs-12">
+          <div class="input-group">
+            <input type="text" class="form-control" id="msg" placeholder="Typing Message in it !">
+            <div class="input-group-addon" id="send-btn">Send</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- jQuery (necessary for Bootstrap's JavaScript plugins) -->
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.11.3/jquery.min.js"></script>
+    <!-- Include all compiled plugins (below), or include individual files as needed -->
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.5/js/bootstrap.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/3.3.0/firebase.js"></script>
+    <script>
+      // Initialize Firebase
+      var config = {
+        apiKey: "YOUR API KEY",
+        authDomain: "YOUR AUTH DOMAIN",
+        databaseURL: "YOUR DATABASE URL",
+        storageBucket: "YOUR STORAGE BUCKET",
+      };
+
+      var uid, displayName;
+      var msgBoard = $('#msgBoard');
+      firebase.initializeApp(config);
+
+      // Get a reference to the database service
+      var database = firebase.database();
+
+      /*
+       * This block allows sign in anonymously
+       * But you need to login to the console and enable anonymous sign in
+       *
+       * firebase.auth().signInAnonymously().catch(function(error) {
+       * // Handle Errors here.
+       * var errorCode = error.code;
+       * var errorMessage = error.message;
+       * // ...
+       *  console.log('errMsg:', errorMessage);
+       * });
+       *
+       */
+
+      // handle the auth state change
+      firebase.auth().onAuthStateChanged(function(user) {
+        if (user) {
+          // User is signed in.
+          uid         = user.uid;
+          displayName = user.displayName;
+
+          if( uid.length > 0 ) {
+            // load the previous messages
+            database.ref('/posts').once('value')
+            .then(function(snapshot) {
+              var historyMsgs = snapshot.val();
+              if( historyMsgs ) {
+                var msgStr = '';
+                for( var x in historyMsgs) {
+                  msgStr += timeToFormat(historyMsgs[x].createdAt) + ' ' + historyMsgs[x].displayName +': ' + historyMsgs[x].msg + "\r\n";
+                }
+                msgBoard.text(msgStr);
+              }
+            });
+
+            // handle the latest data when new data is added to database
+            database.ref('posts').on('child_added', function(data) {
+              var val = data.val();
+              msgBoard.append(timeToFormat(val.createdAt) + ' ' + val.displayName + ': ' + val.msg + "\r\n");
+            });
+          }
+        } else {
+          // When user is signed out, redirect to Google Auth Page
+          var provider = new firebase.auth.GoogleAuthProvider();
+          firebase.auth().signInWithRedirect(provider);
+        }
+
+      });
+
+      // logout
+      function logout() {
+        firebase.auth().signOut()
+        .then(function(){
+          alert('已登出');
+        });
+      }
+
+      // save message to database
+      function writeMsg(uid, displayName ,msg) {
+        // A post entry.
+        var postData = {
+          uid        : uid,
+          msg        : msg,
+          displayName: displayName,
+          createdAt  : Date.now()
+        };
+
+        // Get a key for a new Post.
+        var newPostKey = database.ref().child('posts').push().key;
+
+        // Write the new post's data simultaneously in the posts list and the user's post list.
+        var updates = {};
+        updates['/posts/' + newPostKey] = postData;
+        updates['/user-posts/' + uid + '/' + newPostKey] = postData;
+
+        // clear text
+        $('#msg').val('');
+
+        return database.ref().update(updates);
+    }
+
+    // change the timestamp to yyyy/mm/dd h:m
+    function timeToFormat(timestamp) {
+      var d = new Date(timestamp);
+      return d.getFullYear() + '/' + (d.getMonth()+1) + '/' + d.getDate() + ' ' + d.getHours() + ':' + d.getMinutes() + ':' + d.getSeconds();
+    }
+
+    $(document).ready(function() {
+      $('#send-btn').bind('click', function(){
+        var val = $('#msg').val();
+        if( val.length === 0 ) {
+          alert('請輸入訊息');
+          return;
+        }
+        writeMsg(uid, displayName, val);
+      });
+
+      $('#msg').keypress(function(event){
+        if(event.keyCode == 13){
+          $('#send-btn').click();
+        }
+      });
+
+      $('#logout').bind('click', function() {
+        logout();
+      });
+    });
+    </script>
+  </body>
+</html>
